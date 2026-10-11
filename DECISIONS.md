@@ -118,3 +118,9 @@ did nothing for one-result searches.
 - **Depends on `ani-cli` (itself an AUR package), plus `mpv`:** the
   pick-check wrapper needs mpv. `xdg-utils` is optional (browser for login).
 - The license file isn't installed: Arch ships the GPL-3.0 text in `licenses`.
+
+## 2026-10-11: Not on the AUR yet
+
+AUR registration is closed to new users, so the package isn't published. The
+PKGBUILD stays in `packaging/aur/` for when it reopens (or for local `makepkg -si`).
+Local install: symlink `~/.local/bin/ani-sync` → the repo's `ani-sync`.

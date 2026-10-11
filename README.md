@@ -14,18 +14,16 @@ AniList is the only record of what you've watched (ani-cli's own history isn't u
 
 ## Install
 
-Arch Linux (AUR):
+Needs bash 5, [ani-cli](https://github.com/pystardust/ani-cli), mpv, curl and jq.
 
 ```sh
-yay -S ani-sync     # or paru, or: git clone https://aur.archlinux.org/ani-sync.git && cd ani-sync && makepkg -si
+git clone https://github.com/PrimoTibalt/ani-sync.git
+cd ani-sync
+ln -s "$PWD/ani-sync" ~/.local/bin/ani-sync   # or: sudo make install
 ```
 
-Anywhere else (needs bash 5, ani-cli, mpv, curl, jq):
-
-```sh
-sudo make install            # PREFIX=/usr/local by default
-sudo make uninstall
-```
+On Arch you can also build a package from `packaging/aur/PKGBUILD` with `makepkg -si`.
+(It isn't on the AUR yet because AUR registration is currently closed.)
 
 ## First run
 
