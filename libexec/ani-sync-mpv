@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# ANI_CLI_PLAYER wrapper used by ani-sync. The file name must contain "mpv"
+# so ani-cli passes mpv-style arguments.
+# ani-cli picks a lone search result without asking its menu, so this is the
+# one place where every pick can be checked: the title ani-cli gives the
+# player (--force-media-title="<show> Episode <n>") must belong to the AniList
+# entry. Otherwise we let ani-sync try the next name (strict mode) or ask.
+
+ANI_SYNC_ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
+for f in state tui match; do
+    # shellcheck source=/dev/null
+    . "$ANI_SYNC_ROOT/lib/$f.sh"
+done
+
+play() { exec "${ANI_SYNC_REAL_PLAYER:-mpv}" "$@"; }
+
+title=""
+for a in "$@"; do
+    case "$a" in --force-media-title=*) title=${a#--force-media-title=} ;; esac
+done
+title=$(sed -E 's/ Episode [^ ]+$//' <<<"$title")
+id=${ANI_SYNC_MEDIA_ID:-}
+{ [ -z "$id" ] || [ -z "$title" ]; } && play "$@"
+
+pick=$(state_get "$id" $PREF_PICK)
+if [ "$pick" != "!pick" ]; then
+    [ "$pick" = "$title" ] && play "$@"
+    if title_matches "$title"; then
+        state_set "$id" $PREF_PICK "$title"
+        play "$@"
+    fi
+    if [ "${ANI_SYNC_STRICT:-0}" = 1 ]; then
+        : >"$ANI_SYNC_TMP/nomatch"
+        exit 1
+    fi
+fi
+
+tui_init || exit 1
+tui_prompt "Check the match" "ani-cli's source found ${C_BOLD}“${title}”${C_RESET} for this search.
+
+Is that ${C_BOLD}$(title_wanted)${C_RESET}?
+
+  ${C_ACCENT}y${C_RESET}  yes, play it (and remember)
+  ${C_ACCENT}n${C_RESET}  no, cancel" "y n q esc" "y play · n cancel"
+tui_suspend
+if [ "$TUI_KEY" = y ]; then
+    state_set "$id" $PREF_PICK "$title"
+    play "$@"
+fi
+: >"$ANI_SYNC_TMP/rejected"
+exit 1

@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# ANI_CLI_MENU replacement used by ani-sync.
+# ani-cli pipes "<n> <title>" lines on stdin, passes the prompt as the last
+# argument and expects the chosen line on stdout. For the anime prompt we
+# answer automatically when we can tell which result is the AniList entry
+# (remembered choice or exact title match); otherwise we show a vim-style
+# picker on the tty and remember the answer.
+# ani-cli skips this menu when a search has a single result; that case is
+# checked by libexec/ani-sync-mpv instead.
+
+ANI_SYNC_ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
+for f in state tui match; do
+    # shellcheck source=/dev/null
+    . "$ANI_SYNC_ROOT/lib/$f.sh"
+done
+
+prompt=${!#}
+id=${ANI_SYNC_MEDIA_ID:-}
+mapfile -t lines
+(( ${#lines[@]} )) || exit 1
+
+titles=()
+for line in "${lines[@]}"; do titles+=("${line#* }"); done
+
+answer() {
+    printf '%s\n' "${lines[$1]}"
+    exit 0
+}
+
+if [[ $prompt == *anime* && -n $id ]]; then
+    remembered=$(state_get "$id" $PREF_PICK)
+    if [ "$remembered" != "!pick" ]; then
+        if [ -n "$remembered" ]; then
+            for i in "${!titles[@]}"; do
+                [ "${titles[i]}" = "$remembered" ] && answer "$i"
+            done
+        fi
+        matches=()
+        for i in "${!titles[@]}"; do
+            title_matches "${titles[i]}" && matches+=("$i")
+        done
+        if (( ${#matches[@]} == 1 )); then
+            state_set "$id" $PREF_PICK "${titles[matches[0]]}"
+            answer "${matches[0]}"
+        fi
+        # not sure: let ani-sync try the show's next name first
+        if [ "${ANI_SYNC_STRICT:-0}" = 1 ]; then
+            : >"$ANI_SYNC_TMP/nomatch"
+            exit 1
+        fi
+    fi
+    title="Which one is “$(title_wanted)”?  (q: none of these)"
+else
+    title=${prompt%: }
+fi
+
+tui_init || exit 1
+tui_list "$title" "j/k move · l/⏎ pick · / filter · q none of these" "" "${titles[@]}"
+tui_suspend
+if [ "$TUI_KEY" != enter ]; then
+    [ -n "${ANI_SYNC_TMP:-}" ] && : >"$ANI_SYNC_TMP/rejected"
+    exit 1
+fi
+[[ $prompt == *anime* && -n $id ]] && state_set "$id" $PREF_PICK "${titles[TUI_SEL]}"
+answer "$TUI_SEL"

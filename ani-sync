@@ -1,0 +1,457 @@
+#!/usr/bin/env bash
+# ani-sync: watch anime with ani-cli, track progress on AniList.
+
+VERSION=0.1.0
+ANI_SYNC_ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+export ANI_SYNC_ROOT
+
+for f in tui state anilist player; do
+    # shellcheck source=/dev/null
+    . "$ANI_SYNC_ROOT/lib/$f.sh"
+done
+
+usage() {
+    cat <<EOF
+ani-sync $VERSION: watch anime with ani-cli, track progress on AniList
+
+Usage: ani-sync [--logout | --help | --version]
+
+The first run asks you to log in to AniList. Press ? inside the app for keys.
+Environment: ANI_SYNC_CLIENT_ID (AniList API client id, default 53505).
+ANI_CLI_* variables (quality, player, ...) are passed through to ani-cli.
+EOF
+}
+
+case "${1:-}" in
+    -h | --help) usage; exit 0 ;;
+    -V | --version) echo "$VERSION"; exit 0 ;;
+    --logout) token_delete; echo "Logged out."; exit 0 ;;
+    "") ;;
+    *) usage >&2; exit 2 ;;
+esac
+
+for dep in ani-cli curl jq awk stty; do
+    command -v "$dep" >/dev/null || { echo "ani-sync: missing dependency: $dep" >&2; exit 1; }
+done
+[ -t 0 ] && [ -t 1 ] || { echo "ani-sync: needs an interactive terminal" >&2; exit 1; }
+
+ANI_SYNC_TMP=$(mktemp -d "${TMPDIR:-/tmp}/ani-sync.XXXXXX") || exit 1
+export ANI_SYNC_TMP
+cleanup() { tui_suspend; rm -rf "$ANI_SYNC_TMP"; }
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
+
+VIEWER_ID="" VIEWER_NAME="" TITLE_LANG=ROMAJI
+
+# ---------------------------------------------------------------- helpers
+
+# ago UNIX_TS -> "3d ago"
+ago() {
+    local d=$(( $(date +%s) - $1 ))
+    if (( $1 <= 0 )); then return
+    elif (( d < 0 )); then printf 'soon'
+    elif (( d < 3600 )); then printf '%dm ago' $(( d / 60 ))
+    elif (( d < 86400 )); then printf '%dh ago' $(( d / 3600 ))
+    elif (( d < 86400 * 60 )); then printf '%dd ago' $(( d / 86400 ))
+    else date -d "@$1" '+%b %Y'
+    fi
+}
+
+# api_failed RC: reacts to a failed AniList call. Returns 0 if the caller
+# should simply retry (we re-logged in), 1 otherwise (message is queued).
+api_failed() {
+    if [ "$1" = 2 ]; then
+        TUI_MSG="Your AniList session expired, please log in again."
+        token_delete
+        login
+        return 0
+    fi
+    TUI_MSG=$(al_last_error)
+    return 1
+}
+
+# ------------------------------------------------------------------ login
+
+# check_token: validates AL_TOKEN and loads the viewer. rc as al_query.
+check_token() {
+    local v rc
+    v=$(al_viewer)
+    rc=$?
+    (( rc )) && return $rc
+    IFS=$'\t' read -r VIEWER_ID VIEWER_NAME TITLE_LANG <<<"$v"
+    TUI_USER=$VIEWER_NAME
+}
+
+# extract_token TEXT: accepts a bare token or a URL/fragment with access_token=
+extract_token() {
+    local t=$1
+    if [[ $t == *access_token=* ]]; then
+        t=${t#*access_token=}
+        t=${t%%&*}
+    fi
+    t=${t//[[:space:]]/}
+    printf '%s' "$t"
+}
+
+login() {
+    local body t rc
+    AL_TOKEN="" TUI_USER=""
+    while :; do
+        body="Welcome! ani-sync keeps your watch progress on ${C_BOLD}AniList${C_RESET}, so you need to log in once.
+
+  ${C_ACCENT}1.${C_RESET} Press ${C_BOLD}o${C_RESET} to open the AniList authorization page in your browser,
+     or open this URL yourself:
+     ${C_ACCENT}${AL_AUTH_URL}${C_RESET}
+  ${C_ACCENT}2.${C_RESET} Log in to AniList and click ${C_BOLD}Approve${C_RESET}.
+  ${C_ACCENT}3.${C_RESET} AniList shows a token, or sends you to a page whose address contains
+     ${C_DIM}#access_token=…${C_RESET}. Copy the token (or the whole address).
+  ${C_ACCENT}4.${C_RESET} Press ${C_BOLD}p${C_RESET} and paste it here.
+
+  The token is stored in ${C_DIM}${TOKEN_FILE}${C_RESET} (only readable by you)."
+        tui_prompt "Log in" "$body" "o p enter q esc" "o open browser · p paste token · q quit"
+        case "$TUI_KEY" in
+            q | esc) exit 0 ;;
+            o)
+                if command -v xdg-open >/dev/null; then
+                    xdg-open "$AL_AUTH_URL" >/dev/null 2>&1 &
+                    TUI_MSG="Opened the browser. Approve ani-sync, then press p to paste the token."
+                else
+                    TUI_MSG="No xdg-open found, open the URL manually."
+                fi
+                ;;
+            p | enter)
+                tui_input "Log in" "Paste the access token (or the URL containing it):" "" 1 || continue
+                t=$(extract_token "$TUI_INPUT")
+                [ -n "$t" ] || continue
+                tui_loading "Log in" "Checking the token with AniList…"
+                al_set_token "$t"
+                check_token
+                rc=$?
+                if (( rc == 0 )); then
+                    token_save "$t"
+                    TUI_MSG="Logged in as $VIEWER_NAME."
+                    return 0
+                fi
+                AL_TOKEN=""
+                TUI_MSG=$( (( rc == 2 )) && echo "That token was rejected by AniList, try again." || al_last_error)
+                ;;
+        esac
+    done
+}
+
+startup() {
+    local rc
+    if ! token_load; then
+        login
+        return
+    fi
+    al_set_token "$AL_TOKEN"
+    while :; do
+        tui_loading "Home" "Connecting to AniList…"
+        check_token
+        rc=$?
+        case $rc in
+            0) return ;;
+            2)
+                token_delete
+                TUI_MSG="Your AniList session expired, please log in again."
+                login
+                return
+                ;;
+        esac
+        tui_prompt "Home" "Couldn't reach AniList:
+  $(al_last_error)" "r q esc" "r retry · q quit"
+        [ "$TUI_KEY" = r ] || exit 1
+    done
+}
+
+# ---------------------------------------------------------------- playing
+
+# Row fields (see AL_JQ_ROW in lib/anilist.sh)
+parse_row() {
+    IFS=$'\t' read -r R_ID R_TITLE R_PROGRESS R_AVAIL R_TOTAL R_MSTATUS R_LSTATUS \
+        R_LATEST R_REPEAT R_EN R_RO R_FORMAT R_YEAR R_SYN <<<"$1"
+}
+
+# mark_watched EP: saves progress on AniList, updates R_PROGRESS/R_LSTATUS
+mark_watched() {
+    local ep=$1 status=CURRENT rep="" rc
+    if (( R_TOTAL > 0 && ep >= R_TOTAL )); then
+        status=COMPLETED
+        [ "$R_LSTATUS" = REPEATING ] && rep=$(( R_REPEAT + 1 ))
+    elif [ "$R_LSTATUS" = REPEATING ]; then
+        status=REPEATING
+    fi
+    while :; do
+        tui_loading "$R_TITLE" "Saving progress to AniList…"
+        al_save "$R_ID" "$ep" "$status" "$rep"
+        rc=$?
+        (( rc == 0 )) && break
+        api_failed $rc && continue
+        return 1
+    done
+    R_PROGRESS=$ep R_LSTATUS=$status
+    if [ "$status" = COMPLETED ]; then
+        TUI_MSG="✓ Episode $ep saved, $R_TITLE is now completed."
+    else
+        TUI_MSG="✓ Episode $ep marked as watched on AniList."
+    fi
+}
+
+# can_play EP: is episode EP out (as far as AniList knows)?
+can_play() {
+    (( R_AVAIL < 0 )) && { (( R_TOTAL <= 0 || $1 <= R_TOTAL )); return; }
+    (( $1 <= R_AVAIL ))
+}
+
+# watch_flow ROW: choose sub/dub, play the next episode, sync progress.
+watch_flow() {
+    local mode ep next body keys rc start=0 custom="" next_query=""
+    parse_row "$1"
+    ep=$(( R_PROGRESS + 1 ))
+    if (( R_TOTAL > 0 && R_PROGRESS >= R_TOTAL )); then
+        TUI_MSG="You've already finished $R_TITLE."
+        return
+    fi
+    if ! can_play "$ep"; then
+        TUI_MSG="Episode $ep of $R_TITLE isn't out yet."
+        return
+    fi
+
+    mode=$(state_get "$R_ID" $PREF_MODE)
+    [ "$mode" = dub ] && start=1
+    TUI_START=$start
+    tui_list "$R_TITLE" "j/k move · l/⏎ choose · h back" "" \
+        "Subtitles"$'\t'"Japanese audio" "Dub"$'\t'"English audio"
+    [ "$TUI_KEY" = enter ] || return
+    mode=$( (( TUI_SEL == 1 )) && echo dub || echo sub)
+    state_set "$R_ID" $PREF_MODE "$mode"
+
+    while :; do
+        play_episode "$R_ID" "$ep" "$mode" "$R_EN" "$R_RO" "$R_SYN" "$next_query"
+        rc=$?
+        next_query=""
+        next=$(( ep + 1 ))
+        if (( rc == 0 )); then
+            body="Finished ${C_BOLD}episode $ep${C_RESET} ($mode)?
+
+  ${C_ACCENT}y${C_RESET}  mark as watched on AniList"
+            keys="y m r n q esc"
+            if can_play "$next"; then
+                body+=" and play episode $next"
+                body+="
+  ${C_ACCENT}m${C_RESET}  mark as watched and go back"
+            fi
+            body+="
+  ${C_ACCENT}r${C_RESET}  replay episode $ep
+  ${C_ACCENT}n${C_RESET}  don't mark, go back"
+            tui_prompt "$R_TITLE" "$body" "$keys" "y/m mark watched · r replay · n back"
+        else
+            body="ani-cli couldn't play ${C_BOLD}episode $ep${C_RESET} ($mode):
+  ${C_WARN}${PLAY_ERR:-exit code $rc}${C_RESET}
+
+  ${C_ACCENT}r${C_RESET}  retry
+  ${C_ACCENT}s${C_RESET}  retry with $( [ "$mode" = sub ] && echo dub || echo subtitles)
+  ${C_ACCENT}c${C_RESET}  search ani-cli with your own title (the source may use another name)
+  ${C_ACCENT}p${C_RESET}  retry, but ask me which result is the right show
+  ${C_ACCENT}m${C_RESET}  mark as watched anyway
+  ${C_ACCENT}q${C_RESET}  go back"
+            tui_prompt "$R_TITLE" "$body" "r s c p m q esc" "r retry · s switch sub/dub · c custom search · p re-pick show · m mark · q back"
+        fi
+        case "$TUI_KEY" in
+            y)
+                mark_watched "$ep" || return
+                can_play "$next" || return
+                ep=$next
+                ;;
+            m) mark_watched "$ep"; return ;;
+            r) ;;
+            s)
+                mode=$( [ "$mode" = sub ] && echo dub || echo sub)
+                state_set "$R_ID" $PREF_MODE "$mode"
+                ;;
+            c)
+                tui_input "$R_TITLE" "Search ani-cli's source for (you confirm the result before it plays):" "$custom" || continue
+                [ -n "${TUI_INPUT//[[:space:]]/}" ] || continue
+                custom=$TUI_INPUT
+                next_query=$custom
+                ;;
+            p) state_set "$R_ID" $PREF_PICK "!pick" ;; # next try: always ask
+            *) return ;;
+        esac
+    done
+}
+
+# ---------------------------------------------------------------- screens
+
+watch_screen() {
+    local out rc reload=1 r right new cursor=0
+    local -a rows=() items=()
+    while :; do
+        if (( reload )); then
+            reload=0
+            tui_loading "Watch" "Fetching your list from AniList…"
+            out=$(al_watch_list "$VIEWER_ID" "$TITLE_LANG")
+            rc=$?
+            if (( rc )); then
+                api_failed $rc && { reload=1; continue; }
+                return
+            fi
+            rows=()
+            [ -n "$out" ] && mapfile -t rows <<<"$out"
+            items=()
+            for r in "${rows[@]}"; do
+                parse_row "$r"
+                if (( R_AVAIL < 0 )); then
+                    right="ep $R_PROGRESS/${R_TOTAL/#-1/?}"
+                else
+                    new=$(( R_AVAIL - R_PROGRESS ))
+                    right="ep $R_PROGRESS/${R_TOTAL/#-1/?} · $new new"
+                fi
+                [ "$R_LSTATUS" = PLANNING ] && right="planned · $R_AVAIL ep out"
+                [ "$R_MSTATUS" = RELEASING ] && right+=" · aired $(ago "$R_LATEST")"
+                items+=("$R_TITLE"$'\t'"$right")
+            done
+            (( ${#rows[@]} == 0 )) && [ -z "$TUI_MSG" ] && TUI_MSG="Nothing to watch: you're all caught up."
+        fi
+        TUI_START=$cursor
+        tui_list "Watch" "j/k move · l/⏎ watch · r refresh · p re-pick ani-cli match · h back" "r p" "${items[@]}"
+        (( TUI_SEL >= 0 )) && cursor=$TUI_SEL
+        case "$TUI_KEY" in
+            enter)
+                watch_flow "${rows[TUI_SEL]}"
+                reload=1
+                ;;
+            r) reload=1 ;;
+            p)
+                (( TUI_SEL < 0 )) && continue
+                parse_row "${rows[TUI_SEL]}"
+                state_set "$R_ID" $PREF_PICK "!pick"
+                TUI_MSG="You'll be asked to pick the ani-cli match for $R_TITLE next time."
+                ;;
+            back) return ;;
+        esac
+    done
+}
+
+# search_actions ROW: what to do with one search result. Returns 0 when the
+# list on AniList changed (results need a refresh).
+search_actions() {
+    local rc state
+    local -a acts=() labels=()
+    parse_row "$1"
+    state="not on your list"
+    [ "$R_LSTATUS" != "-" ] && state="${R_LSTATUS,,} · ep $R_PROGRESS/${R_TOTAL/#-1/?}"
+    if [ "$R_LSTATUS" = "-" ]; then
+        acts+=(plan) labels+=("Add to Planning"$'\t'"shows up in Watch once episodes are out")
+    fi
+    acts+=(watch) labels+=("Watch episode $(( R_PROGRESS + 1 )) now"$'\t'"choose sub/dub next")
+    tui_list "$R_TITLE  ($state)" "j/k move · l/⏎ choose · h back" "" "${labels[@]}"
+    [ "$TUI_KEY" = enter ] || return 1
+    case "${acts[TUI_SEL]}" in
+        plan)
+            while :; do
+                tui_loading "$R_TITLE" "Adding to your Planning list…"
+                al_save "$R_ID" 0 PLANNING
+                rc=$?
+                (( rc == 0 )) && break
+                api_failed $rc && continue
+                return 1
+            done
+            TUI_MSG="✓ Added $R_TITLE to Planning."
+            ;;
+        watch) watch_flow "$1" ;;
+    esac
+    return 0
+}
+
+search_screen() {
+    local q="" out rc r right refresh cursor
+    local -a rows=() items=()
+    while :; do
+        tui_input "Search" "Search AniList for anime:" "$q" || return
+        q=$TUI_INPUT
+        [ -n "${q//[[:space:]]/}" ] || continue
+        refresh=1 cursor=0
+        while :; do
+            if (( refresh )); then
+                refresh=0
+                tui_loading "Search" "Searching AniList for “$q”…"
+                out=$(al_search "$q" "$TITLE_LANG")
+                rc=$?
+                if (( rc )); then
+                    api_failed $rc && { refresh=1; continue; }
+                    break
+                fi
+                rows=()
+                [ -n "$out" ] && mapfile -t rows <<<"$out"
+                if (( ${#rows[@]} == 0 )); then
+                    TUI_MSG="No anime found for “$q”."
+                    break
+                fi
+                items=()
+                for r in "${rows[@]}"; do
+                    parse_row "$r"
+                    right="${R_FORMAT/#-/?} · ${R_YEAR/#-/?}"
+                    (( R_TOTAL > 0 )) && right+=" · $R_TOTAL ep"
+                    [ "$R_MSTATUS" = RELEASING ] && right+=" · airing"
+                    [ "$R_MSTATUS" = NOT_YET_RELEASED ] && right+=" · upcoming"
+                    [ "$R_LSTATUS" != "-" ] && right+=" · ● ${R_LSTATUS,,}"
+                    items+=("$R_TITLE"$'\t'"$right")
+                done
+            fi
+            TUI_START=$cursor
+            tui_list "Search: $q" "j/k move · l/⏎ actions · a add to Planning · / filter · h new search" "a" "${items[@]}"
+            (( TUI_SEL >= 0 )) && cursor=$TUI_SEL
+            case "$TUI_KEY" in
+                enter) search_actions "${rows[TUI_SEL]}" && refresh=1 ;;
+                a)
+                    (( TUI_SEL < 0 )) && continue
+                    parse_row "${rows[TUI_SEL]}"
+                    if [ "$R_LSTATUS" != "-" ]; then
+                        TUI_MSG="$R_TITLE is already on your list (${R_LSTATUS,,})."
+                        continue
+                    fi
+                    tui_loading "Search" "Adding to your Planning list…"
+                    if al_save "$R_ID" 0 PLANNING; then
+                        TUI_MSG="✓ Added $R_TITLE to Planning."
+                        refresh=1
+                    else
+                        api_failed $? || true
+                        refresh=1
+                    fi
+                    ;;
+                back) break ;;
+            esac
+        done
+    done
+}
+
+home_screen() {
+    while :; do
+        tui_list "Home" "j/k move · l/⏎ open · q quit" "" \
+            "Watch"$'\t'"new episodes and shows you haven't finished" \
+            "Search"$'\t'"find anime and add it to your list" \
+            "Log out"$'\t'"forget the AniList token on this computer" \
+            "Quit"
+        case "$TUI_KEY" in
+            back) return ;;
+            enter)
+                case $TUI_SEL in
+                    0) watch_screen; TUI_START=0 ;;
+                    1) search_screen; TUI_START=1 ;;
+                    2)
+                        token_delete
+                        TUI_MSG="Logged out."
+                        login
+                        ;;
+                    3) return ;;
+                esac
+                ;;
+        esac
+    done
+}
+
+tui_init || { echo "ani-sync: can't open the terminal" >&2; exit 1; }
+startup
+home_screen
