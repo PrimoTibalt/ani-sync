@@ -1,0 +1,21 @@
+pkgbase = ani-sync
+	pkgdesc = Vim-style TUI that plays anime with ani-cli and tracks progress on AniList
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/PrimoTibalt/ani-sync
+	arch = any
+	license = GPL-3.0-or-later
+	depends = bash
+	depends = ani-cli
+	depends = mpv
+	depends = curl
+	depends = jq
+	depends = gawk
+	depends = coreutils
+	depends = sed
+	depends = grep
+	optdepends = xdg-utils: open the AniList login page in your browser
+	source = ani-sync-0.1.0.tar.gz::https://github.com/PrimoTibalt/ani-sync/archive/refs/tags/v0.1.0.tar.gz
+	sha256sums = e439a68fe5855cc26d41e5afdee1f247fca0b28b47a5ea9aebd764274aa91ffb
+
+pkgname = ani-sync

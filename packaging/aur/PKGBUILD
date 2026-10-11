@@ -9,7 +9,7 @@ license=('GPL-3.0-or-later')
 depends=('bash' 'ani-cli' 'mpv' 'curl' 'jq' 'gawk' 'coreutils' 'sed' 'grep')
 optdepends=('xdg-utils: open the AniList login page in your browser')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('e439a68fe5855cc26d41e5afdee1f247fca0b28b47a5ea9aebd764274aa91ffb')
 
 check() {
     cd "$pkgname-$pkgver"
