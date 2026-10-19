@@ -9,7 +9,11 @@ history is not used.
 - `ani-sync`: entry point: arg parsing, login, screens (Home, Watch, Search),
   watch flow (sub/dub → play → mark watched).
 - `lib/tui.sh`: vim-style TUI toolkit (`tui_list`, `tui_prompt`, `tui_input`,
-  `tui_loading`, `tui_help`). Draws only to fd 3 (`/dev/tty`).
+  `tui_loading`, `tui_help`). Draws only to fd 3 (`/dev/tty`). Colours are the
+  `C_*` globals: plain ANSI by default, replaced by the Omarchy theme's
+  truecolor values when `~/.local/state/omarchy/current/theme/colors.toml`
+  exists (`_tui_omarchy_theme`; `ANI_SYNC_THEME=default` opts out). Never
+  hard-code escapes elsewhere: use `C_*`.
 - `lib/anilist.sh`: GraphQL client (`al_query`) + queries (`al_viewer`,
   `al_watch_list`, `al_search`, `al_save`). `AL_JQ_ROW` turns media into the TSV
   row format every screen uses.
@@ -52,6 +56,7 @@ history is not used.
 - `~/.local/state/ani-sync/prefs.tsv`: `id  mode  query  provider-title`
   (`!pick` in the last column forces the picker next time)
 - `~/.local/state/ani-sync/ani-cli/`: ani-cli's history, kept apart from the user's
+- `~/.local/state/omarchy/current/theme/colors.toml`: read-only, Omarchy theme colours
 
 ## Testing
 
@@ -62,4 +67,6 @@ video, point `ANI_CLI_PLAYER` at a fake script whose name contains `mpv` and
 which prints its `--force-media-title`. Always check *which show* played: a
 stream link alone proves nothing. (`ANI_CLI_PLAYER=debug` bypasses the wrapper.) Public AniList lists (e.g.
 user id 5) can be read without a token to test `al_watch_list`.
+Check colours with `tmux capture-pane -p -e | cat -v` (with and without
+`ANI_SYNC_THEME=default`).
 `bash -n` every file after edits (shellcheck isn't installed here).

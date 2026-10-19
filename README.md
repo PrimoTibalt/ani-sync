@@ -65,6 +65,16 @@ Some shows simply aren't on ani-cli's source.
   The check that the right show is playing only works with mpv (the default).
 - `ANI_SYNC_CLIENT_ID`: use your own AniList API client. Its redirect URL must be
   `https://anilist.co/api/v2/oauth/pin`.
+- `ANI_SYNC_THEME=default`: don't use the Omarchy theme (see below).
+
+## Colours
+
+On [Omarchy](https://omarchy.org/), ani-sync uses the current system theme's
+colours (accent, selection, yellow, green) from
+`~/.local/state/omarchy/current/theme/colors.toml`. They are read at startup,
+so restart ani-sync after `omarchy theme set`. Everywhere else, and in
+terminals without truecolor (`COLORTERM`), it uses your terminal's own ANSI
+colours.
 
 ## License
 

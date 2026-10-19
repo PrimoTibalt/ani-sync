@@ -124,3 +124,19 @@ did nothing for one-result searches.
 AUR registration is closed to new users, so the package isn't published. The
 PKGBUILD stays in `packaging/aur/` for when it reopens (or for local `makepkg -si`).
 Local install: symlink `~/.local/bin/ani-sync` → the repo's `ani-sync`.
+
+## 2026-10-19: Omarchy theme colours
+
+- **Source:** `~/.local/state/omarchy/current/theme/colors.toml`, the theme
+  Omarchy has applied (its own templates are generated from it). Parsed with a
+  plain `read` loop, no TOML library. Only `#rrggbb` values are taken.
+- **Mapping:** accent → `C_ACCENT`; title bar = accent background with the
+  theme's background as text; selected row = `selection` background with bold
+  accent text (like Omarchy's other apps, instead of reverse video);
+  yellow → `C_WARN`, green → `C_OK`. `C_DIM` stays faint (SGR 2): the themes'
+  `muted`/`light_foreground` aren't consistent enough between themes to use.
+- **Fallback:** without the file, without `COLORTERM=truecolor|24bit`, or with
+  `ANI_SYNC_THEME=default`, the plain ANSI colours stay. Those already follow
+  the terminal's palette, so non-Omarchy systems look as before.
+- Read once at startup; no live reload on `omarchy theme set` (not worth a
+  file watch for a short-lived TUI).

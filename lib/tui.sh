@@ -5,6 +5,44 @@
 
 C_RESET=$'\e[0m' C_BOLD=$'\e[1m' C_DIM=$'\e[2m' C_REV=$'\e[7m'
 C_ACCENT=$'\e[36m' C_WARN=$'\e[33m' C_OK=$'\e[32m'
+C_HEAD=$C_REV$C_ACCENT # title bar
+C_SEL=$C_REV$C_ACCENT  # selected list row
+
+# _tui_hex VAR SGR HEX: VAR = 24-bit colour escape (SGR 38 = fg, 48 = bg)
+_tui_hex() {
+    local h=${3#\#}
+    printf -v "$1" '\e[%s;2;%d;%d;%dm' "$2" "0x${h:0:2}" "0x${h:2:2}" "0x${h:4:2}"
+}
+
+# Omarchy: take the colours of the current system theme. Needs a truecolor
+# terminal (all of Omarchy's are); ANI_SYNC_THEME=default keeps the plain ANSI
+# colours above.
+_tui_omarchy_theme() {
+    local file=$HOME/.local/state/omarchy/current/theme/colors.toml key val
+    local -A c=()
+    [ "${ANI_SYNC_THEME:-auto}" = default ] && return
+    [[ ${COLORTERM:-} == truecolor || ${COLORTERM:-} == 24bit ]] || return
+    [ -r "$file" ] || return
+    while IFS=' =' read -r key val; do
+        val=${val//\"/}
+        [[ $val =~ ^#[0-9a-fA-F]{6}$ ]] && c[$key]=$val
+    done <"$file"
+    [[ -n ${c[accent]:-} && -n ${c[background]:-} ]] || return
+    local fg_accent bg_accent fg_bg bg_sel
+    _tui_hex fg_accent 38 "${c[accent]}"
+    _tui_hex bg_accent 48 "${c[accent]}"
+    _tui_hex fg_bg 38 "${c[background]}"
+    C_ACCENT=$fg_accent
+    C_HEAD=$bg_accent$fg_bg
+    C_SEL=$C_REV$fg_accent
+    if [ -n "${c[selection]:-}" ]; then
+        _tui_hex bg_sel 48 "${c[selection]}"
+        C_SEL=$bg_sel$fg_accent$C_BOLD
+    fi
+    [ -n "${c[yellow]:-}" ] && _tui_hex C_WARN 38 "${c[yellow]}"
+    [ -n "${c[green]:-}" ] && _tui_hex C_OK 38 "${c[green]}"
+}
+_tui_omarchy_theme
 
 TUI_ACTIVE=0
 TUI_RESIZED=0
@@ -97,7 +135,7 @@ _tui_line() { BUF+=$'\e['"$1"$';1H\e[2K'"$2"; }
 _tui_header() {
     local right="${TUI_USER:+$TUI_USER }"
     _tui_fit " ani-sync › $1" $(( TUI_COLS - ${#right} ))
-    _tui_line 1 "${C_REV}${C_ACCENT}${C_BOLD}${FIT}${C_RESET}${C_REV}${C_ACCENT}${right}${C_RESET}"
+    _tui_line 1 "${C_HEAD}${C_BOLD}${FIT}${C_RESET}${C_HEAD}${right}${C_RESET}"
 }
 
 # _tui_footer HINT [STATUS]: status line (defaults to TUI_MSG) + dim key hints
@@ -275,7 +313,7 @@ tui_list() {
             lw=$(( TUI_COLS - 3 - ${#right} - (${#right} ? 2 : 0) ))
             _tui_fit "$left" "$lw"
             if (( i == pos )); then
-                _tui_line $(( row + 3 )) "${C_REV}${C_ACCENT} ▶ ${FIT}${right:+  $right}${C_RESET}"
+                _tui_line $(( row + 3 )) "${C_SEL} ▶ ${FIT}${right:+  $right}${C_RESET}"
             else
                 _tui_line $(( row + 3 )) "   ${FIT}${right:+  ${C_DIM}$right${C_RESET}}"
             fi

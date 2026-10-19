@@ -19,8 +19,8 @@ search_terms() {
 _run_ani_cli() {
     local rc
     rm -f "$ANI_SYNC_TMP/nomatch" "$ANI_SYNC_TMP/rejected"
-    printf '\n\e[1;36m▶ %s — episode %s (%s)\e[0m  \e[2msearching ani-cli for "%s"\e[0m\n' \
-        "$PLAY_NAME" "$PLAY_EP" "$PLAY_MODE" "$1"
+    printf '\n%s▶ %s — episode %s (%s)%s  %ssearching ani-cli for "%s"%s\n' \
+        "$C_BOLD$C_ACCENT" "$PLAY_NAME" "$PLAY_EP" "$PLAY_MODE" "$C_RESET" "$C_DIM" "$1" "$C_RESET"
     # shellcheck disable=SC2086 # ani-cli wants the query as separate words
     ANI_CLI_MENU="$ANI_SYNC_ROOT/libexec/ani-sync-menu" \
         ANI_CLI_PLAYER=$PLAY_PLAYER ANI_SYNC_REAL_PLAYER=$PLAY_REAL_PLAYER \

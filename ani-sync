@@ -17,7 +17,8 @@ ani-sync $VERSION: watch anime with ani-cli, track progress on AniList
 Usage: ani-sync [--logout | --help | --version]
 
 The first run asks you to log in to AniList. Press ? inside the app for keys.
-Environment: ANI_SYNC_CLIENT_ID (AniList API client id, default 53505).
+Environment: ANI_SYNC_CLIENT_ID (AniList API client id, default 53505),
+ANI_SYNC_THEME=default (ignore the Omarchy theme, use plain terminal colours).
 ANI_CLI_* variables (quality, player, ...) are passed through to ani-cli.
 EOF
 }
