@@ -140,3 +140,15 @@ Local install: symlink `~/.local/bin/ani-sync` → the repo's `ani-sync`.
   the terminal's palette, so non-Omarchy systems look as before.
 - Read once at startup; no live reload on `omarchy theme set` (not worth a
   file watch for a short-lived TUI).
+
+## 2026-10-19: Dropping / removing an anime
+
+- `d` on Watch (and "Drop / remove" in search actions) asks first, then offers
+  both: **Dropped** status (AniList's own way to stop a show; progress and
+  history stay, and the Watch query only fetches CURRENT/REPEATING/PLANNING so
+  it disappears) or **delete** the list entry (for things added by mistake).
+- `DeleteMediaListEntry` needs the list entry id, not the media id. Rows don't
+  carry it, so `al_delete` looks it up with `MediaList(userId, mediaId)`
+  instead of adding a column to every TSV row.
+- Per-anime prefs (`prefs.tsv`) are kept: harmless, and useful if the show is
+  added again.

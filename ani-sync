@@ -283,6 +283,40 @@ watch_flow() {
     done
 }
 
+# drop_flow ROW: take the anime off the watch list, either as Dropped (keeps
+# the progress on AniList) or by deleting the entry. Returns 0 when the list
+# on AniList changed.
+drop_flow() {
+    local rc what
+    parse_row "$1"
+    if [ "$R_LSTATUS" = "-" ]; then
+        TUI_MSG="$R_TITLE isn't on your list."
+        return 1
+    fi
+    tui_prompt "$R_TITLE" "Stop watching ${C_BOLD}$R_TITLE${C_RESET}? (${R_LSTATUS,,} · ep $R_PROGRESS/${R_TOTAL/#-1/?})
+
+  ${C_ACCENT}d${C_RESET}  mark as Dropped on AniList (keeps your progress)
+  ${C_ACCENT}x${C_RESET}  remove it from your AniList list completely
+  ${C_ACCENT}n${C_RESET}  cancel" "d x n q esc" "d drop · x remove · n cancel"
+    case "$TUI_KEY" in d | x) ;; *) return 1 ;; esac
+    while :; do
+        if [ "$TUI_KEY" = d ]; then
+            tui_loading "$R_TITLE" "Marking as Dropped on AniList…"
+            al_save "$R_ID" "$R_PROGRESS" DROPPED
+            what="marked as Dropped"
+        else
+            tui_loading "$R_TITLE" "Removing from your AniList list…"
+            al_delete "$VIEWER_ID" "$R_ID"
+            what="removed from your list"
+        fi
+        rc=$?
+        (( rc == 0 )) && break
+        api_failed $rc && continue
+        return 1
+    done
+    TUI_MSG="✓ $R_TITLE $what."
+}
+
 # ---------------------------------------------------------------- screens
 
 watch_screen() {
@@ -316,7 +350,7 @@ watch_screen() {
             (( ${#rows[@]} == 0 )) && [ -z "$TUI_MSG" ] && TUI_MSG="Nothing to watch: you're all caught up."
         fi
         TUI_START=$cursor
-        tui_list "Watch" "j/k move · l/⏎ watch · r refresh · p re-pick ani-cli match · h back" "r p" "${items[@]}"
+        tui_list "Watch" "j/k move · l/⏎ watch · d drop/remove · r refresh · p re-pick ani-cli match · h back" "r p d" "${items[@]}"
         (( TUI_SEL >= 0 )) && cursor=$TUI_SEL
         case "$TUI_KEY" in
             enter)
@@ -324,6 +358,10 @@ watch_screen() {
                 reload=1
                 ;;
             r) reload=1 ;;
+            d)
+                (( TUI_SEL < 0 )) && continue
+                drop_flow "${rows[TUI_SEL]}" && reload=1
+                ;;
             p)
                 (( TUI_SEL < 0 )) && continue
                 parse_row "${rows[TUI_SEL]}"
@@ -347,6 +385,9 @@ search_actions() {
         acts+=(plan) labels+=("Add to Planning"$'\t'"shows up in Watch once episodes are out")
     fi
     acts+=(watch) labels+=("Watch episode $(( R_PROGRESS + 1 )) now"$'\t'"choose sub/dub next")
+    if [ "$R_LSTATUS" != "-" ]; then
+        acts+=(drop) labels+=("Drop / remove"$'\t'"stop watching: mark as Dropped or delete from your list")
+    fi
     tui_list "$R_TITLE  ($state)" "j/k move · l/⏎ choose · h back" "" "${labels[@]}"
     [ "$TUI_KEY" = enter ] || return 1
     case "${acts[TUI_SEL]}" in
@@ -362,6 +403,7 @@ search_actions() {
             TUI_MSG="✓ Added $R_TITLE to Planning."
             ;;
         watch) watch_flow "$1" ;;
+        drop) drop_flow "$1" || return 1 ;;
     esac
     return 0
 }

@@ -46,6 +46,10 @@ about a year). `ani-sync --logout` forgets it.
 
 Each screen lists its own extra keys at the bottom (e.g. `r` refresh, `a` add to Planning).
 
+To stop watching a show, press `d` on it in Watch (or choose "Drop / remove" in
+a search result's actions), then `d` to mark it as Dropped on AniList (your
+progress is kept) or `x` to delete it from your AniList list.
+
 ## Finding the right show
 
 ani-cli's source often names shows differently from AniList. ani-sync tries

@@ -15,7 +15,7 @@ history is not used.
   exists (`_tui_omarchy_theme`; `ANI_SYNC_THEME=default` opts out). Never
   hard-code escapes elsewhere: use `C_*`.
 - `lib/anilist.sh`: GraphQL client (`al_query`) + queries (`al_viewer`,
-  `al_watch_list`, `al_search`, `al_save`). `AL_JQ_ROW` turns media into the TSV
+  `al_watch_list`, `al_search`, `al_save`, `al_delete`). `AL_JQ_ROW` turns media into the TSV
   row format every screen uses.
 - `lib/player.sh`: `play_episode` runs `ani-cli --no-detach --exit-after-play`.
 - `lib/state.sh`: token file + per-anime prefs (`prefs.tsv`).

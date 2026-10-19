@@ -147,3 +147,15 @@ al_save() {
         "$(jq -nc --argjson id "$1" --argjson p "$2" --arg s "$3" --arg r "${4:-}" \
             '{id: $id, p: $p, s: $s} + (if $r == "" then {} else {r: ($r | tonumber)} end)')" >/dev/null
 }
+
+# al_delete USER_ID MEDIA_ID: removes the anime from the user's list. The
+# delete mutation wants the list entry id, so look that up first.
+al_delete() {
+    local data entry
+    data=$(al_query 'query ($u: Int, $m: Int) { MediaList(userId: $u, mediaId: $m) { id } }' \
+        "{\"u\": $1, \"m\": $2}") || return
+    entry=$(jq -r '.MediaList.id // empty' <<<"$data")
+    [ -n "$entry" ] || { al_err "that anime isn't on your list anymore"; return 1; }
+    al_query 'mutation ($id: Int) { DeleteMediaListEntry(id: $id) { deleted } }' \
+        "{\"id\": $entry}" >/dev/null
+}
